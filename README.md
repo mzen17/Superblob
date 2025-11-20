@@ -9,4 +9,4 @@ Rahul et al formalized emergent semantics into a network (IEEE International Con
 - A | CLIP is a generalized framework to contrast images.   
 
 ## Notes
-imagedata is the original high resolution images. Please contact me at mzeng5[at]uiowa[dot]edu if you need them.
+imagedata is the original high resolution images. To get workdata, please run fix.sh to move the workdata from surveyapp/src/lib to the root. Please contact me at mzeng5[at]uiowa[dot]edu if you need the high resolution images.
