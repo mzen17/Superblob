@@ -84,7 +84,6 @@ def query(graph, term, return_similarity=False):
     term_embedding = model.encode([term])[0]
     label_embeddings = model.encode(labels)
     
-    # Calculate cosine similarities
     similarities = cosine_similarity([term_embedding], label_embeddings)[0]
     
     # Find the index with highest similarity

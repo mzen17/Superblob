@@ -7,6 +7,8 @@ dependencies:
   - webdriver-manager
   - pytorch
   - torchvision
+  - plotly
+  - openai
   - streamlit
   - sentence-transformers
   - google-genai

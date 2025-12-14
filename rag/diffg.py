@@ -1,6 +1,6 @@
 from rag.graph import loadgraph, entity_collapse, query
 
-def graphdiff(graphA = "data/F1.tsv", graphB = "data/F2.tsv"):
+def graphdiff(graphA, graphB, uniongraph, simtr, uniontr):
     """Compare two graphs and find differences in edge labels.
     
     1. Creates union of both graphs
@@ -11,27 +11,14 @@ def graphdiff(graphA = "data/F1.tsv", graphB = "data/F2.tsv"):
     Returns: list of dicts [{edge: str, queryA_set: [images], queryB_set: [images]}]
     """
     
-    print("Loading both graphs")
-    gA = loadgraph(graphA)
-    gB = loadgraph(graphB)
-    
-    # Create union (concat)
-    union = gA + gB
-    
-    # Find unique edges - we only care about the edge labels
-    uniq_edge_results = entity_collapse(union)
+    uniq_edge_results = entity_collapse(uniongraph, uniontr)
     unique_edges = [edge_label for edge_label, images in uniq_edge_results]
-    
-    # entity_collapse generates our retrival graphs
-    tr = 0.6
-    ragA = entity_collapse(gA, clustering_tr=tr)
-    ragB = entity_collapse(gB, clustering_tr=tr)
-    
+        
     # Build comparison map
     data = []
     for edge in unique_edges:
-        resultA = query(ragA, edge, return_similarity=True)
-        resultB = query(ragB, edge, return_similarity=True)
+        resultA = query(graphA, edge, return_similarity=True)
+        resultB = query(graphB, edge, return_similarity=True)
         
         if not resultA or not resultB:
             continue
@@ -41,7 +28,7 @@ def graphdiff(graphA = "data/F1.tsv", graphB = "data/F2.tsv"):
         
         # Skip if the matched label is different from the query edge
         # or if similarity is too low (< 0.2)
-        if simA < 0.3 or simB < 0.3:
+        if simA < simtr or simB < simtr:
             continue
         
         data.append({
@@ -101,3 +88,27 @@ def jaccard(diffdata):
     print(f"Mean Jaccard: {mean_jaccard}")
     return jaccard_scores, mean_jaccard
 
+
+def matrixdiff(graph_set, tr=0.6, simtr=0.30, uniontr=0.4):
+    n = len(graph_set)
+
+    tcgraphs = [loadgraph(graph) for graph in graph_set]
+    tcrags = [entity_collapse(g, tr) for g in tcgraphs]
+
+    ans = [[-1.0 for _ in range(n)] for _ in range(n)]
+    debug = [[{} for _ in range(n)] for _ in range(n)]
+
+    for i in range(n):
+        for j in range(n):
+            print(f"Working on {i} {j}")
+            if i == j:
+                ans[i][j] = 1
+        
+            elif ans[j][i] != -1:
+                ans[i][j] = ans[j][i]
+            
+            else:
+                diffcompute = graphdiff(tcrags[i], tcrags[j], tcgraphs[i] + tcgraphs[j], simtr, uniontr)
+                debug[i][j], ans[i][j] = jaccard(diffcompute)
+
+    return debug, ans

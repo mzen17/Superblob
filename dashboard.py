@@ -9,13 +9,18 @@ Combines three visualization tools:
 import streamlit as st
 import sys
 from pathlib import Path
+import ast
+import re
 
 import plotly.graph_objects as go
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 
 import pandas as pd
 import numpy as np
 import networkx as nx
 import base64
+import json
 from io import BytesIO
 import os
 import math
@@ -24,6 +29,8 @@ from PIL import Image
 from analysis.jaccard_matrix import jaccard as jcd
 from analysis.jaccard_matrix import loadgraph as loadgraphset
 from rag.graph import loadgraph, entity_collapse, query
+from rag.diffg import matrixdiff
+from openai import OpenAI
 
 
 # Add subdirectories to path for imports
@@ -396,7 +403,7 @@ with tab2:
     if selected_file2:
         with st.spinner("Loading and processing graph..."):
             graph = loadgraph(str(selected_file2))
-            entities = entity_collapse(graph)
+            entities = entity_collapse(graph, clustering_tr=0.5)
         
         st.success(f"Loaded {len(graph)} edges, collapsed into {len(entities)} entities")
         
@@ -480,23 +487,21 @@ with tab3:
 
 # Tab 4: LMM + RAG Chat
 with tab4:
-    from google import genai
+    # Initialize OpenAI client pointing to local server
+    client = OpenAI(
+        base_url="http://10.42.0.11:18181/v1",
+        api_key="not-needed"
+    )
+    MODEL_NAME = "NexaAI/Qwen3-VL-4B-Instruct-GGUF"
+    
+    def encode_image_base64(image_path):
+        """Encode image to base64 string."""
+        with open(image_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode('utf-8')
     
     st.header("🤖 LMM + RAG Chat")
     st.markdown("Query graphs with natural language and get LMM responses with image context")
-    
-    # API Key input
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        api_key = st.text_input(
-            "Gemini API Key", 
-            type="password",
-            placeholder="Enter your Gemini API key",
-            help="Your API key is not stored and only used for this session. Note: This is sent to your browser."
-        )
-    with col2:
-        st.markdown("**Security Note:**")
-        st.caption("⚠️ API key is stored in browser session only")
+    st.info("🖥️ Using local model: NexaAI/Qwen3-VL-4B-Instruct-GGUF at http://10.42.0.11:18181")
     
     # Graph selection
     st.subheader("Select Graphs to Query")
@@ -520,15 +525,11 @@ with tab4:
     )
     
     # Send button
-    if st.button("Send", type="primary", disabled=not api_key or not user_prompt):
-        if not api_key:
-            st.error("Please enter your Gemini API key")
-        elif not user_prompt:
+    if st.button("Send", type="primary", disabled=not user_prompt):
+        if not user_prompt:
             st.error("Please enter a prompt")
         else:
-            # Initialize Gemini client
             try:
-                client = genai.Client(api_key=api_key)
                 
                 # Load and collapse graphs
                 with st.spinner("Loading graphs..."):
@@ -549,35 +550,50 @@ with tab4:
                         
                         if result1:
                             _, image_files1 = result1
-                            images1 = []
                             
-                            for img_file in image_files1:
-                                img_path = Path("workdata") / img_file
-                                if img_path.exists():
-                                    try:
-                                        images1.append(Image.open(img_path))
-                                    except Exception:
-                                        pass
-                            
-                            if images1:
+                            if image_files1:
                                 rag_prompt = f"You are shown images related to '{user_prompt}'. Answer the following using the provided images: {user_prompt}"
                                 
-                                response1 = client.models.generate_content(
-                                    model="gemini-2.5-flash-lite",
-                                    contents=[rag_prompt, *images1]
+                                # Create message with base64-encoded images
+                                messages = [
+                                    {
+                                        "role": "user",
+                                        "content": [{"type": "text", "text": rag_prompt}]
+                                    }
+                                ]
+                                
+                                for img_file in image_files1:
+                                    img_path = Path("workdata") / img_file
+                                    if img_path.exists():
+                                        try:
+                                            img_base64 = encode_image_base64(str(img_path))
+                                            messages[0]["content"].append({
+                                                "type": "image_url",
+                                                "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}
+                                            })
+                                        except Exception:
+                                            pass
+                                
+                                response1 = client.chat.completions.create(
+                                    model=MODEL_NAME,
+                                    messages=messages,
+                                    max_tokens=300,
+                                    temperature=0.7
                                 )
                                 
                                 st.markdown("**Response:**")
-                                st.write(response1.text)
+                                st.write(response1.choices[0].message.content)
                                 
-                                st.markdown(f"**Retrieved Images ({len(images1)}):**")
+                                st.markdown(f"**Retrieved Images ({len(image_files1)}):**")
                                 # Show thumbnails
-                                img_cols = st.columns(min(len(images1), 4))
-                                for idx, img in enumerate(images1[:4]):
-                                    with img_cols[idx % 4]:
-                                        st.image(img, use_container_width=True)
-                                if len(images1) > 4:
-                                    st.caption(f"...and {len(images1) - 4} more images")
+                                img_cols = st.columns(min(len(image_files1), 4))
+                                for idx, img_file in enumerate(image_files1[:4]):
+                                    img_path = Path("workdata") / img_file
+                                    if img_path.exists():
+                                        with img_cols[idx % 4]:
+                                            st.image(str(img_path), use_container_width=True)
+                                if len(image_files1) > 4:
+                                    st.caption(f"...and {len(image_files1) - 4} more images")
                             else:
                                 st.warning("No valid images found for this query")
                         else:
@@ -591,35 +607,50 @@ with tab4:
                         
                         if result2:
                             _, image_files2 = result2
-                            images2 = []
                             
-                            for img_file in image_files2:
-                                img_path = Path("workdata") / img_file
-                                if img_path.exists():
-                                    try:
-                                        images2.append(Image.open(img_path))
-                                    except Exception:
-                                        pass
-                            
-                            if images2:
+                            if image_files2:
                                 rag_prompt = f"You are shown images related to '{user_prompt}'. Answer the following using the provided images: {user_prompt}"
                                 
-                                response2 = client.models.generate_content(
-                                    model="gemini-2.5-flash-lite",
-                                    contents=[rag_prompt, *images2]
+                                # Create message with base64-encoded images
+                                messages = [
+                                    {
+                                        "role": "user",
+                                        "content": [{"type": "text", "text": rag_prompt}]
+                                    }
+                                ]
+                                
+                                for img_file in image_files2:
+                                    img_path = Path("workdata") / img_file
+                                    if img_path.exists():
+                                        try:
+                                            img_base64 = encode_image_base64(str(img_path))
+                                            messages[0]["content"].append({
+                                                "type": "image_url",
+                                                "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}
+                                            })
+                                        except Exception:
+                                            pass
+                                
+                                response2 = client.chat.completions.create(
+                                    model=MODEL_NAME,
+                                    messages=messages,
+                                    max_tokens=300,
+                                    temperature=0.7
                                 )
                                 
                                 st.markdown("**Response:**")
-                                st.write(response2.text)
+                                st.write(response2.choices[0].message.content)
                                 
-                                st.markdown(f"**Retrieved Images ({len(images2)}):**")
+                                st.markdown(f"**Retrieved Images ({len(image_files2)}):**")
                                 # Show thumbnails
-                                img_cols = st.columns(min(len(images2), 4))
-                                for idx, img in enumerate(images2[:4]):
-                                    with img_cols[idx % 4]:
-                                        st.image(img, use_container_width=True)
-                                if len(images2) > 4:
-                                    st.caption(f"...and {len(images2) - 4} more images")
+                                img_cols = st.columns(min(len(image_files2), 4))
+                                for idx, img_file in enumerate(image_files2[:4]):
+                                    img_path = Path("workdata") / img_file
+                                    if img_path.exists():
+                                        with img_cols[idx % 4]:
+                                            st.image(str(img_path), use_container_width=True)
+                                if len(image_files2) > 4:
+                                    st.caption(f"...and {len(image_files2) - 4} more images")
                             else:
                                 st.warning("No valid images found for this query")
                         else:
@@ -629,22 +660,24 @@ with tab4:
                 with col3:
                     st.subheader("🔮 Baseline (no RAG)")
                     with st.spinner("Generating baseline response..."):
-                        baseline_response = client.models.generate_content(
-                            model="gemini-2.0-flash-exp",
-                            contents=[user_prompt]
+                        baseline_response = client.chat.completions.create(
+                            model=MODEL_NAME,
+                            messages=[{"role": "user", "content": user_prompt}],
+                            max_tokens=300,
+                            temperature=0.7
                         )
                         
                         st.markdown("**Response:**")
-                        st.write(baseline_response.text)
+                        st.write(baseline_response.choices[0].message.content)
                         
                         st.caption("No images provided - pure LLM response")
                 
             except Exception as e:
                 st.error(f"Error: {str(e)}")
-                st.info("Make sure your API key is valid and you have access to Gemini API")
+                st.info("Make sure the local model server at http://10.42.0.11:18181 is running")
     
     # Information section
-    with st.expander("ℹ️ How it works"):
+    with st.expander("How it works"):
         st.markdown("""
         **LMM + RAG Chat** combines Large Multimodal Models with Retrieval-Augmented Generation:
         
@@ -664,10 +697,8 @@ with tab5:
     
     st.header("📊 Stats View")
     st.markdown("Comparison matrices showing Jaccard distances and graph differences")
-    
-    # Function definitions from jaccard-matrix.py
 
-    
+    # Function definitions from jaccard-matrix.py
     def jaccard_matrix(graph_paths):
         """Generate Jaccard distance matrix for multiple graphs."""
         graphs = [loadgraphset(path) for path in graph_paths]
@@ -687,41 +718,6 @@ with tab5:
         
         return matrix
     
-    @st.cache_data
-    def graphdiff_matrix(graph_paths):
-        """Generate graph diff matrix for multiple graphs."""
-        n = len(graph_paths)
-        matrix = [[0.0 for _ in range(n)] for _ in range(n)]
-        detailed_scores = [[{} for _ in range(n)] for _ in range(n)]
-        
-        # Set diagonal to 1.0 (jaccard(A,A) is always 1)
-        for i in range(n):
-            matrix[i][i] = 1.0
-            detailed_scores[i][i] = {}
-        
-        # Only compute upper triangle (excluding diagonal)
-        total_pairs = (n * (n - 1)) // 2  # n choose 2
-        progress_bar = st.progress(0)
-        current = 0
-        
-        for i in range(n):
-            for j in range(i + 1, n):
-                # graphdiff returns the diffdata
-                # jaccard returns (jaccard_scores_dict, mean_jaccard)
-                diffdata = graphdiff(graph_paths[i], graph_paths[j])
-                scores_dict, mean_jaccard = jaccard(diffdata)
-                matrix[i][j] = mean_jaccard
-                detailed_scores[i][j] = scores_dict
-                # Mirror to lower triangle
-                matrix[j][i] = mean_jaccard
-                detailed_scores[j][i] = scores_dict
-                current += 1
-                progress_bar.progress(current / total_pairs)
-                print(f"{total_pairs - current} remaining.")
-        
-        progress_bar.empty()
-        return matrix, detailed_scores
-    
     # Dataset labels
     datasets = ["F1", "F2", "F3", "F4", "U1", "U2", "U3", "U4"]
     graph_paths = [f"data/{ds}.tsv" for ds in datasets]
@@ -736,7 +732,7 @@ with tab5:
             st.cache_data.clear()
             st.success("Cache cleared!")
             st.rerun()
-    
+
     with st.spinner("Computing Jaccard matrix..."):
         jaccard_mat = jaccard_matrix(graph_paths)
         jaccard_df = pd.DataFrame(jaccard_mat, index=datasets, columns=datasets)
@@ -745,10 +741,6 @@ with tab5:
     # Custom colorscale: <0.2=red, 0.2-0.3=yellow, >0.3=green (continuous gradient)
     custom_colorscale = [
         [0.0, 'rgb(255, 0,0)'],      # Red at 0
-#        [0.2, 'rgb(255, 114, 118)'],      # Red at 0.2
-#        [0.25, 'rgb(255,200,0)'],   # Orange-yellow at 0.25
-#        [0.3, 'rgb(255,255,0)'],    # Yellow at 0.3
-#        [0.35, 'rgb(154, 205, 50)'],   # Yellow-green at 0.35
         [0.4, 'rgb(200,255,0)'],      # Green at 0.4
         [1.0, 'rgb(0,200,0)']       # Dark green at 1.0
     ]
@@ -885,28 +877,16 @@ with tab5:
     st.subheader("Table 2: Graph Difference Matrix")
     st.markdown("Based on semantic edge label similarity using RAG query comparison")
     
+    @st.cache_data
+    def getMat(graph_paths):
+        # cache
+        return matrixdiff(graph_paths)
+
+
     with st.spinner("Computing graph difference matrix (this may take a while)..."):
-        diff_mat, detailed_scores = graphdiff_matrix(graph_paths)
+        detail, diff_mat = getMat(graph_paths)
         diff_df = pd.DataFrame(diff_mat, index=datasets, columns=datasets)
-    
-    # Create custom hover text with detailed scores
-    hover_text = []
-    for i in range(len(datasets)):
-        row_hover = []
-        for j in range(len(datasets)):
-            if i == j:
-                row_hover.append(f"{datasets[i]} vs {datasets[j]}<br>Median: 1.000<br>(Same dataset)")
-            else:
-                scores = detailed_scores[i][j]
-                # Format the top 5 edge scores for hover
-                hover_lines = [f"{datasets[i]} vs {datasets[j]}<br>Median: {diff_mat[i][j]:.3f}<br><br>Top Edge Scores:"]
-                for idx, (edge, score) in enumerate(list(scores.items())[:5]):
-                    hover_lines.append(f"{edge}: {score:.3f}")
-                if len(scores) > 5:
-                    hover_lines.append(f"... and {len(scores) - 5} more")
-                row_hover.append("<br>".join(hover_lines))
-        hover_text.append(row_hover)
-    
+        
     # Display heatmap for Diff matrix
     fig2 = go.Figure(data=go.Heatmap(
         z=diff_df.values,
@@ -916,7 +896,6 @@ with tab5:
         zmin=0,
         zmax=1,
         text=np.round(diff_df.values, 3),
-        hovertext=hover_text,
         hoverinfo='text',
         texttemplate='%{text}',
         textfont={"size": 12},
@@ -986,92 +965,132 @@ with tab5:
     
     # Table 3: Gemini Response Reranking Similarity Matrix
     st.subheader("Table 3: LMM Response Semantic Similarity Matrix")
-    st.markdown("Based on cross-encoder reranking scores of Gemini responses to 'library' query across datasets")
+    st.markdown("Based on MiniLM-L6-v2 text embeddings of raw outputs with cosine similarity")
     
-    @st.cache_data
-    def gemini_rerank_matrix(datasets, edge_label):
-        """Generate reranking similarity matrix for Gemini outputs."""
-        from sentence_transformers import CrossEncoder
+    # Dynamic edge label selection with checkboxes
+    st.markdown("**Select Edge Labels to Include:**")
+    
+    # Available edge labels (from gemini-run.py)
+    available_edge_labels = ["bridge", "trail", "city", "library", "Iowa Memorial Union (IMU)", "Seamans engineering"]
+    
+    # Create checkboxes in columns
+    checkbox_cols = st.columns(3)
+    selected_edge_labels = []
+    
+    for idx, edge_label in enumerate(available_edge_labels):
+        col_idx = idx % 3
+        with checkbox_cols[col_idx]:
+            if st.checkbox(edge_label, value=(edge_label in ["library", "Iowa Memorial Union (IMU)"]), key=f"edge_checkbox_{edge_label}"):
+                selected_edge_labels.append(edge_label)
+    
+    if not selected_edge_labels:
+        st.warning("⚠️ Please select at least one edge label to generate the similarity matrix.")
+        st.stop()
+    
+    def gemini_rerank_matrix_multi(datasets, edge_labels):
+        """Generate similarity matrix for Gemini outputs using MiniLM embeddings and cosine similarity.
         
-        # Use a reranking model instead of cosine similarity
-        model = CrossEncoder('cross-encoder/stsb-distilroberta-base')
+        Creates embeddings for the raw text output and computes cosine similarity.
+        """
         
-        # Load all text outputs
-        texts = []
+        model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+        
+        # Track which datasets have all required outputs
         valid_datasets = []
+        all_raw_texts_by_label = {label: [] for label in edge_labels}  # Store raw text content
         
         for dataset in datasets:
-            output_path = Path(f"data/gemini/{dataset}/{edge_label}.out")
-            if output_path.exists():
-                with open(output_path, 'r') as f:
-                    text = f.read().strip()
-                    if text:
-                        texts.append(text)
-                        valid_datasets.append(dataset)
-                    else:
-                        st.warning(f"Empty output file for {dataset}/{edge_label}.out")
-            else:
-                st.warning(f"Missing output file: {output_path}")
+            has_all_labels = True
+            dataset_raw_texts = {}
+            
+            for edge_label in edge_labels:
+                output_path = Path(f"data/gemini/{dataset}/{edge_label}.out")
+                if output_path.exists():
+                    with open(output_path, 'r') as f:
+                        text = f.read().strip()
+                        if text:
+                            dataset_raw_texts[edge_label] = text
+                        else:
+                            has_all_labels = False
+                            st.warning(f"Empty output file for {dataset}/{edge_label}.out")
+                            break
+                else:
+                    has_all_labels = False
+                    st.warning(f"Missing output file: {output_path}")
+                    break
+            
+            if has_all_labels:
+                valid_datasets.append(dataset)
+                for label in edge_labels:
+                    all_raw_texts_by_label[label].append(dataset_raw_texts[label])
         
-        if len(texts) < 2:
-            st.error("Not enough valid Gemini outputs found. Run gemini-run.py first.")
-            return None, None, None
+        if len(valid_datasets) < 2:
+            st.error("Not enough valid Gemini outputs found. Run gemini-run.py first for the selected edge labels.")
+            return None, None, None, None
         
-        # Compute pairwise reranking scores
-        n = len(texts)
-        similarity_matrix = np.zeros((n, n))
+        n = len(valid_datasets)
         
-        # Create all pairs at once for batch prediction
-        pairs = []
-        pair_indices = []
-        for i in range(n):
-            for j in range(n):
-                if i != j:
-                    pairs.append((texts[i], texts[j]))
-                    pair_indices.append((i, j))
+        # Compute similarity matrices for each edge label
+        similarity_matrices = []
         
-        # Batch predict all pairs at once
-        scores = model.predict(pairs)
+        for edge_label in edge_labels:
+            texts = all_raw_texts_by_label[edge_label]
+            
+            # Generate embeddings for raw texts
+            embeddings = model.encode(texts, convert_to_tensor=False)
+            
+            # Compute cosine similarity matrix
+            similarity_matrix = cosine_similarity(embeddings)
+            
+            similarity_matrices.append(similarity_matrix)
         
-        # Fill in the similarity matrix
-        for idx, (i, j) in enumerate(pair_indices):
-            similarity_matrix[i][j] = scores[idx]
+        # Average across all edge labels
+        avg_similarity_matrix = np.mean(similarity_matrices, axis=0)
+        for i in range(len(avg_similarity_matrix)):
+            for j in range(len(avg_similarity_matrix[i])):
+                avg_similarity_matrix[i][j] = float("{:.2f}".format(avg_similarity_matrix[i][j]))
         
-        # Set diagonal to 1.0
-        for i in range(n):
-            similarity_matrix[i][i] = 1.0
-        
-        return similarity_matrix, valid_datasets, texts
+        print(avg_similarity_matrix)
+
+        # Return all data needed for detailed view
+        return avg_similarity_matrix, valid_datasets, all_raw_texts_by_label, similarity_matrices
     
-    with st.spinner("Computing Gemini response similarity matrix..."):
-        gemini_mat, valid_datasets, gemini_texts = gemini_rerank_matrix(datasets, edge_label="library")
+    with st.spinner(f"Computing Gemini response similarity matrix across {', '.join(selected_edge_labels)}..."):
+        result = gemini_rerank_matrix_multi(datasets, edge_labels=selected_edge_labels)
     
-    if gemini_mat is not None and valid_datasets is not None and gemini_texts is not None:
-        gemini_df = pd.DataFrame(gemini_mat, index=valid_datasets, columns=valid_datasets)
+    if result[0] is not None:
+        gemini_mat, valid_datasets, all_raw_texts_by_label, similarity_matrices = result
+        print(gemini_mat)
+
+        # Convert to generic 2D array with rounded values
+        simMat = [[round(gemini_mat[i][j].item(), 2) for j in range(len(gemini_mat[i]))] for i in range(len(gemini_mat))]
+
+        print(simMat)
+
+        gemini_df = pd.DataFrame(simMat, index=valid_datasets, columns=valid_datasets)
+        edge_labels = selected_edge_labels
         
-        # Create custom hover text with Gemini outputs
+        # Create simplified hover text
         hover_text = []
         for i in range(len(valid_datasets)):
             row_hover = []
             for j in range(len(valid_datasets)):
                 if i == j:
-                    hover_text_cell = f"<b>{valid_datasets[i]}</b><br>Similarity: 1.00<br>(Same dataset)<br><br><b>Response:</b><br>{gemini_texts[i][:200]}..."
+                    hover_text_cell = f"<b>{valid_datasets[i]}</b><br>Avg Similarity: 1.00<br>(Same dataset)<br><br>Click for details"
                 else:
                     hover_text_cell = (
                         f"<b>{valid_datasets[i]} vs {valid_datasets[j]}</b><br>"
-                        f"Similarity: {gemini_df.values[i][j]:.2f}<br><br>"
-                        f"<b>{valid_datasets[i]} Response:</b><br>{gemini_texts[i][:150]}...<br><br>"
-                        f"<b>{valid_datasets[j]} Response:</b><br>{gemini_texts[j][:150]}..."
+                        f"Avg Similarity: {gemini_df.values[i][j]:.2f}<br><br>"
+                        f"Click to see detailed comparison"
                     )
                 row_hover.append(hover_text_cell)
             hover_text.append(row_hover)
         
         # Create heatmap with custom colorscale for Table 3
         gemini_colorscale = [
-            [0.0, 'rgb(255, 0, 0)'],      # Red at 0
-            [0.3, 'rgb(255, 127, 127)'],    # Yellow at 0.5
-            [0.6, 'rgb(255, 255, 0)'],    # Yellow at 0.5
-            [1.0, 'rgb(0, 200, 0)']       # Green at 1
+            [0.0, 'rgb(255, 0, 0)'],      
+            [0.5, 'rgb(255, 255, 0)'],    
+            [1.0, 'rgb(0, 200, 0)']     
         ]
         
         fig3 = go.Figure(data=go.Heatmap(
@@ -1081,20 +1100,31 @@ with tab5:
             colorscale=gemini_colorscale,
             zmin=0,
             zmax=1,
-            text=np.round(gemini_df.values, 2),
+            text=gemini_df.values,
             texttemplate='%{text}',
             textfont={"size": 12},
             hovertext=hover_text,
+            hoverlabel=dict(bgcolor="black"),
             hoverinfo='text',
-            colorbar=dict(title="Rerank Score")
+            colorbar=dict(title="Cosine Similarity Score")
         ))
         
+        # Create dynamic title based on selected edge labels
+        edge_labels_str = " + ".join(edge_labels)
         fig3.update_layout(
-            title="Gemini Response Similarity Matrix (library)",
+            title=f"Gemini Response Similarity Matrix ({edge_labels_str} avg)",
             xaxis_title="Dataset",
             yaxis_title="Dataset",
             height=550,
-            width=550
+            width=550,
+            hoverlabel=dict(
+                bgcolor="white",
+                font_size=10,
+                font_family="monospace",
+                align="left",
+                namelength=-1
+            )
+
         )
         
         # Calculate statistics
@@ -1132,7 +1162,8 @@ with tab5:
         col1, col2 = st.columns([1, 1])
         
         with col1:
-            st.plotly_chart(fig3, use_container_width=False)
+            # Use plotly_events to capture clicks
+            st.plotly_chart(fig3, use_container_width=False, key="gemini_heatmap")
         
         with col2:
             # Statistics
@@ -1159,6 +1190,64 @@ with tab5:
             gemini_pairs_df['Similarity Score'] = gemini_pairs_df['Similarity Score'].apply(lambda x: f"{x:.2f}")
             styled_gemini = gemini_pairs_df.style.apply(highlight_groups, axis=1)
             st.dataframe(styled_gemini, use_container_width=True, hide_index=True, height=400)
+        
+        # Add selection interface
+        st.markdown("---")
+        st.subheader("Detailed Comparison")
+        st.markdown(f"Select two datasets to compare their responses across {', '.join(edge_labels)} queries")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            dataset1_select = st.selectbox("Dataset 1", valid_datasets, key="gemini_dataset1")
+        with col2:
+            dataset2_select = st.selectbox("Dataset 2", valid_datasets, index=min(1, len(valid_datasets)-1), key="gemini_dataset2")
+        
+        if dataset1_select and dataset2_select:
+            idx1 = valid_datasets.index(dataset1_select)
+            idx2 = valid_datasets.index(dataset2_select)
+            
+            st.markdown(f"### {dataset1_select} vs {dataset2_select}")
+            
+            # Show average score
+            avg_score = gemini_df.values[idx1][idx2]
+            st.metric("Average Similarity Score", f"{avg_score:.3f}")
+            
+            # Create comparison table for each edge label
+            for label_idx, edge_label in enumerate(edge_labels):
+                st.markdown(f"#### {edge_label.upper()}")
+                
+                # Get individual score
+                individual_score = similarity_matrices[label_idx][idx1][idx2]
+                st.write(f"**Similarity Score:** {individual_score:.3f}")
+                
+                # Display both responses side by side
+                resp_col1, resp_col2 = st.columns(2)
+                
+                with resp_col1:
+                    st.markdown(f"**{dataset1_select} Response:**")
+                    raw_text = all_raw_texts_by_label[edge_label][idx1]
+                    
+                    st.text_area(
+                        f"{dataset1_select}_{edge_label}_full",
+                        raw_text,
+                        height=300,
+                        key=f"resp_{dataset1_select}_{edge_label}_full",
+                        label_visibility="collapsed"
+                    )
+                
+                with resp_col2:
+                    st.markdown(f"**{dataset2_select} Response:**")
+                    raw_text = all_raw_texts_by_label[edge_label][idx2]
+                    
+                    st.text_area(
+                        f"{dataset2_select}_{edge_label}_full",
+                        raw_text,
+                        height=300,
+                        key=f"resp_{dataset2_select}_{edge_label}_full",
+                        label_visibility="collapsed"
+                    )
+                
+                st.markdown("---")
     
     # ANOSIM Interpretation
     st.markdown("---")

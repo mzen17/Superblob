@@ -55,8 +55,8 @@ def generateIntraMatrix(graph_set_a, graph_set_b):
 # print(generateIntraMatrix(a, b))
 
 
-a = loadgraph("data/U2.tsv")
-b = loadgraph("data/U1.tsv")
+a = loadgraph("data/bsl.tsv")
+b = loadgraph("data/F4.tsv")
 
 print(jaccard(a, b))
 
