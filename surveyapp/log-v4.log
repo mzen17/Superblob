@@ -1,0 +1,40 @@
+$ vite dev --host
+Port 5173 is in use, trying another one...
+
+  VITE v7.2.2  ready in 326 ms
+
+  ➜  Local:   http://localhost:5174/
+  ➜  Network: http://10.42.0.11:5174/
+  ➜  Network: http://192.168.7.221:5174/
+  ➜  Network: http://172.17.0.1:5174/
+3:05:19 PM [vite] (ssr) page 3:05:21 PM [vite] (client) page reload build/data-policy.html
+3:05:21 PM [vite] (client) page reload build/index.html
+3:05:21 PM [vite] (client) page reload build/survey.html
+svelte config changed, restarting vite dev-server. changed file: /home/mzen/tmp/ESN-Personal-Analysis/surveyapp/svelte.config.js
+3:08:02 PM [vite] server restarted.
+3:12:04 PM [vite] (client) page reload build/index.html
+3:12:04 PM [vite] (client) page reload build/data-policy.html
+3:12:04 PM [vite] (client) page reload build/survey.html
+svelte config changed, restarting vite dev-server. changed file: /home/mzen/tmp/ESN-Personal-Analysis/surveyapp/svelte.config.js
+3:27:19 PM [vite] server restarted.
+3:27:39 PM [vite] (client) page reload build/data-policy.html
+3:27:39 PM [vite] (client) page reload build/index.html
+3:27:39 PM [vite] (client) page reload build/survey.html
+svelte config changed, restarting vite dev-server. changed file: /home/mzen/tmp/ESN-Personal-Analysis/surveyapp/svelte.config.js
+3:30:44 PM [vite] server restarted.
+svelte config changed, restarting vite dev-server. changed file: /home/mzen/tmp/ESN-Personal-Analysis/surveyapp/svelte.config.js
+3:31:23 PM [vite] server restarted.
+svelte config changed, restarting vite dev-server. changed file: /home/mzen/tmp/ESN-Personal-Analysis/surveyapp/svelte.config.js
+3:34:38 PM [vite] Unexpected identifier 'adapter'
+3:34:38 PM [vite] server restart failed
+svelte config changed, restarting vite dev-server. changed file: /home/mzen/tmp/ESN-Personal-Analysis/surveyapp/svelte.config.js
+3:35:13 PM [vite] Unexpected identifier 'pages'
+3:35:13 PM [vite] server restart failed
+svelte config changed, restarting vite dev-server. changed file: /home/mzen/tmp/ESN-Personal-Analysis/surveyapp/svelte.config.js
+3:35:34 PM [vite] Unexpected identifier 'pages'
+3:35:34 PM [vite] server restart failed
+svelte config changed, restarting vite dev-server. changed file: /home/mzen/tmp/ESN-Personal-Analysis/surveyapp/svelte.config.js
+3:36:18 PM [vite] Unexpected identifier 'paths'
+3:36:18 PM [vite] server restart failed
+svelte config changed, restarting vite dev-server. changed file: /home/mzen/tmp/ESN-Personal-Analysis/surveyapp/svelte.config.js
+3:39:32 PM [vite] server restarted.

@@ -220,7 +220,7 @@
                 <div class="main-layout">
                 <div class="left-panel">
                     <div class="current-image-container">
-                        <img src="/workdata/{currentImage}" alt={currentImage} class="current-image" />
+                        <img src="/sv/workdata/{currentImage}" alt={currentImage} class="current-image" />
                         <p class="image-label"><strong>{getAnonymousName(currentImage)}</strong></p>
                     </div>
                 </div>                    <div class="right-panel">
@@ -237,7 +237,7 @@
                                         tabindex="0"
                                         on:keypress={(e) => e.key === 'Enter' && toggleImageSelection(image)}
                                     >
-                                        <img src="/workdata/{image}" alt={image} class="grid-image" />
+                                        <img src="/sv/workdata/{image}" alt={image} class="grid-image" />
                                         <p class="grid-image-label">{getAnonymousName(image)}</p>
                                         {#if selectedImages.has(image)}
                                             <div class="selected-badge">✓</div>
@@ -271,9 +271,9 @@
                     {#each Array.from(selectedImages) as image}
                         <div class="reason-item">
                             <div class="reason-images">
-                                <img src="/workdata/{currentImage}" alt={currentImage} class="reason-thumb" />
+                                <img src="/sv/workdata/{currentImage}" alt={currentImage} class="reason-thumb" />
                                 <span class="arrow">→</span>
-                                <img src="/workdata/{image}" alt={image} class="reason-thumb" />
+                                <img src="/sv/workdata/{image}" alt={image} class="reason-thumb" />
                             </div>
                             <div class="reason-input-group">
                                 <label for="reason-{image}">{getAnonymousName(image)}</label>
