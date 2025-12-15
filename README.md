@@ -1,4 +1,4 @@
-# Personal ESN Analysis
+# Superblob
 <img width="2791" height="1884" alt="image" src="https://github.com/user-attachments/assets/c1d4d688-e513-4c8a-98ff-53491461e4df" />
 
 ## Can we use ESNs as our bias parameter for RAGs?
@@ -17,5 +17,9 @@ Rahul et al formalized emergent semantics into a network (IEEE International Con
 
 - You can argue that its not fair, that some people will associate the rivers more closely together while others might associate that top river to the Staples in Iowa City more (if they can recognize that its the building and its map location). But this is actually what proves our point that semantics is not very universally defined. Furthermore, we can exploit this relationship to characterize the trait of being able to recognize that building, which is highly individual specific, and see if we can exploit that relationship somehow to create our RAG personality.
 
+## How to run
+Please see code-instructions.md for directions.
+
 ## Notes
 imagedata is the original high resolution images. To get workdata, please run fix.sh to move the workdata from surveyapp/src/lib to the root. Please contact me at mzeng5[at]uiowa[dot]edu if you need the high resolution images.
+
