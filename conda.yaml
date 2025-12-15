@@ -1,4 +1,4 @@
-name: superblob
+name: superblob2
 channels:
   - conda-forge
 dependencies:
@@ -7,6 +7,7 @@ dependencies:
   - webdriver-manager
   - pytorch
   - torchvision
+  - pyarrow<21.0.0
   - plotly
   - openai
   - streamlit
